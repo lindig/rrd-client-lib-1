@@ -67,7 +67,7 @@ librrd.a: $(OBJ)
 	ranlib $@
 
 librrd.so: $(OBJ)
-	$(CC) -shared -o $@ $(OBJ)
+	$(CC) -shared -o $@ $(OBJ) $(LIB)
 
 rrdtest: rrdtest.o librrd.a
 	$(CC) $(CFLAGS) -o $@ $^ $(LIB)
