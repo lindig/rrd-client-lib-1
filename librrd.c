@@ -54,6 +54,7 @@
 
 struct rrd_plugin {
     char           *name;       /* name of the plugin */
+    char           *path;       /* path to file */
     RRD_SOURCE     *sources[RRD_MAX_SOURCES];
     JSON_Value     *meta;       /* meta data for the plugin */
     char           *buf;        /* buffer where we keep protocol data */
@@ -282,6 +283,7 @@ rrd_open(char *name, rrd_domain_t domain, char *path)
     }
 
     plugin->name = name;
+    plugin->path = path;
     plugin->domain = domain;
     /*
      * mark all slots for data sources as free
@@ -313,7 +315,10 @@ rrd_close(RRD_PLUGIN * plugin)
     assert(plugin);
     int rc;
 
+
     rc = close(plugin->file);
+    if (rc == 0)
+      rc = unlink(plugin->path);
     json_value_free(plugin->meta);
     free(plugin->buf);
     free(plugin);

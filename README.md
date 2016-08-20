@@ -111,6 +111,9 @@ for a single machine (`RRD_LOCAL_DOMAIN`) or multiple
 NULL. If it isn't, it us used to obtain a timestamp instead of using
 time(3).
 
+When a plugin is opened, the file at `path` is being created and it is
+removed when the plugin is closed.
+
 ## Data Sources
 
 A typical client has several data sources. A data source either reports

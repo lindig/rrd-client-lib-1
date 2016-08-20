@@ -36,18 +36,15 @@ clean:
 test: 	rrdtest rrdclient
 	./rrdtest
 	seq 1 10 | ./rrdclient rrdclient.rrd
+	test ! -f rrdclient.rrd
 
 .PHONY: test-integration
 test-integration: rrdclient
-	seq 1 10 | while read i; do \
-		echo $$i | ./rrdclient rrdclient.rrd ;\
-		rrdreader file --once rrdclient.rrd v2 ;\
-	done
-	seq 1 20 | while read i; do \
-		echo $$i | ./rrdclient rrdclient.rrd ;\
-		sleep 4 ;\
-	done &  rrdreader file rrdclient.rrd v2 \
-	|| echo "a final exception Rrd_protocol.No_update is OK"
+	seq 1 10 | while read i; do echo $$i ; sleep 4; done \
+		| ./rrdclient rrdclient.rrd &
+	rrdreader file rrdclient.rrd v2 \
+		|| echo "a final exception Rrd_protocol.No_update is OK"
+	test ! -f rrdclient.rrd
 
 .PHONY: valgrind
 valgrind: rrdtest
