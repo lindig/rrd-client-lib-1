@@ -313,18 +313,17 @@ int
 rrd_close(RRD_PLUGIN * plugin)
 {
     assert(plugin);
-    int rc;
+    int             rc;
 
 
     rc = close(plugin->file);
     if (rc == 0)
-      rc = unlink(plugin->path);
+        rc = unlink(plugin->path);
     json_value_free(plugin->meta);
     free(plugin->buf);
     free(plugin);
     return (rc == 0 ? RRD_OK : RRD_FILE_ERROR);
 }
-
 /*
  * Add a new data source to a plugin. It is inserted into the first free
  * slot available.
