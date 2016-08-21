@@ -10,7 +10,7 @@
 
 
 NAME    = rrd-client-lib
-VERSION = 1.0.0
+VERSION = 1.1.0
 
 CC	= gcc
 CFLAGS	= -std=gnu99 -g -fpic -Wall
