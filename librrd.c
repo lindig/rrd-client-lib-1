@@ -1,25 +1,25 @@
 /*
- *
  * Copyright (c) 2016 Citrix
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
  * without limitation the rights to use, copy, modify, merge, publish,
  * distribute, sublicense, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
  *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
- * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  *
  */
 
@@ -41,6 +41,7 @@
 
 #define MAGIC "DATASOURCES"
 #define MAGIC_SIZE (sizeof (MAGIC)-1)
+#define RRD_MAX_JSON (2048 * RRD_MAX_SOURCES)
 
 #ifndef __APPLE__
 #include <endian.h>
@@ -48,8 +49,8 @@
 #endif
 
 /*
- * The type RRD_PLUGIN below is private to the implementation and
- * entirely managed by it.
+ * The type RRD_PLUGIN below is private to the implementation and entirely
+ * managed by it.
  */
 
 struct rrd_plugin {
@@ -76,13 +77,31 @@ struct rrd_header {
     uint32_t        rrd_checksum_meta;
     uint32_t        rrd_header_datasources;
     uint64_t        rrd_timestamp;
-    uint32_t        rrd_data[0]; /* more data follows */
-} __attribute__ ((packed));
+    uint32_t        rrd_data[0];/* more data follows */
+}               __attribute__((packed));
 typedef struct rrd_header RRD_HEADER;
 
 /*
- * invalidate the current buffer by removing it. It will be re-created by
- * sample().
+ * write data to fd
+ */
+static int
+write_exact(int fd, const void *data, size_t size)
+{
+    size_t          offset = 0;
+    ssize_t         len;
+    while (offset < size) {
+        len = write(fd, (const char *)data + offset, size - offset);
+        if ((len == -1) && (errno == EINTR))
+            continue;
+        if (len <= 0)
+            return -1;
+        offset += len;
+    }
+    return 0;
+}
+
+/*
+ * invalidate the current buffer. It will be re-created by sample().
  */
 static void
 invalidate(RRD_PLUGIN * plugin)
@@ -219,13 +238,13 @@ initialise(RRD_PLUGIN * plugin)
 
     plugin->meta = json_for_plugin(plugin);
     size_meta = json_serialization_size_pretty(plugin->meta);
-    assert(size_meta < 2048 * plugin->n); /* just a safeguard */
+    assert(size_meta < RRD_MAX_JSON);   /* just a safeguard */
 
     size_total = 0;
     size_total += sizeof(RRD_HEADER);
-    size_total += plugin->n * sizeof(int64_t);
+    size_total += RRD_MAX_SOURCES * sizeof(int64_t);
     size_total += sizeof(uint32_t);
-    size_total += size_meta;
+    size_total += RRD_MAX_JSON;
 
     plugin->buf_size = size_total;
     plugin->buf = malloc(size_total);
@@ -250,26 +269,24 @@ initialise(RRD_PLUGIN * plugin)
         plugin->buf = NULL;
         return -1;
     }
-
     p64 = (int64_t *) (plugin->buf + sizeof(RRD_HEADER));
     for (size_t i = 0; i < plugin->n; i++) {
         *p64++ = htonll(0x0011223344556677);
     }
     p32 = (int32_t *) p64;
     *p32++ = htonl(size_meta);
-    json_serialize_to_buffer_pretty(plugin->meta, (char *) p32, size_meta);
+    json_serialize_to_buffer_pretty(plugin->meta, (char *)p32, size_meta);
 
     uint32_t        crc;
     crc = crc32(0L, Z_NULL, 0);
-    crc = crc32(crc, (unsigned char *) p32, size_meta);
+    crc = crc32(crc, (unsigned char *)p32, size_meta);
     header->rrd_checksum_meta = htonl(crc);
     return 0;
 }
 
 /*
  * rrd_open creates the data structure that represents a plugin with
- * initially no data source. Data sources will be added later by
- * rrd_add_src.
+ * initially no data source. Data sources will be added later by rrd_add_src.
  */
 RRD_PLUGIN     *
 rrd_open(char *name, rrd_domain_t domain, char *path)
@@ -281,7 +298,6 @@ rrd_open(char *name, rrd_domain_t domain, char *path)
     if (!plugin) {
         return NULL;
     }
-
     plugin->name = name;
     plugin->path = path;
     plugin->domain = domain;
@@ -293,11 +309,22 @@ rrd_open(char *name, rrd_domain_t domain, char *path)
     }
     plugin->n = 0;
     plugin->buf_size = 0;
-    plugin->buf = NULL;         /* will be initialised by sample() */
+    plugin->buf = NULL;
     plugin->meta = NULL;
 
+    if (initialise(plugin) != 0) {
+        invalidate(plugin);
+        free(plugin);
+        return NULL;
+    }
     plugin->file = open(path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (plugin->file == -1) {
+        invalidate(plugin);
+        invalidate(plugin);
+        return NULL;
+    }
+    if (write_exact(plugin->file, plugin->buf, plugin->buf_size) != 0) {
+        invalidate(plugin);
         free(plugin);
         return NULL;
     }
@@ -305,9 +332,8 @@ rrd_open(char *name, rrd_domain_t domain, char *path)
 }
 
 /*
- * unregister a plugin. Free all resources that we have allocted. Note
- * that calling free(NULL) is fine in case some resource was already
- * de-allocated.
+ * unregister a plugin. Free all resources that we have allocted. Note that
+ * calling free(NULL) is fine in case some resource was already de-allocated.
  */
 int
 rrd_close(RRD_PLUGIN * plugin)
@@ -319,14 +345,13 @@ rrd_close(RRD_PLUGIN * plugin)
     rc = close(plugin->file);
     if (rc == 0)
         rc = unlink(plugin->path);
-    json_value_free(plugin->meta);
-    free(plugin->buf);
+    invalidate(plugin);
     free(plugin);
     return (rc == 0 ? RRD_OK : RRD_FILE_ERROR);
 }
 /*
- * Add a new data source to a plugin. It is inserted into the first free
- * slot available.
+ * Add a new data source to a plugin. It is inserted into the first free slot
+ * available.
  */
 int
 rrd_add_src(RRD_PLUGIN * plugin, RRD_SOURCE * source)
@@ -378,44 +403,21 @@ rrd_del_src(RRD_PLUGIN * plugin, RRD_SOURCE * source)
 }
 
 /*
- * write data to fd
- */
-static int
-write_exact(int fd, const void *data, size_t size)
-{
-    size_t          offset = 0;
-    ssize_t         len;
-    while (offset < size) {
-        len = write(fd, (const char *) data + offset, size - offset);
-        if ((len == -1) && (errno == EINTR))
-            continue;
-        if (len <= 0)
-            return -1;
-        offset += len;
-    }
-    return 0;
-}
-/*
  * Sample obtains a values form all data sources by calling their sample
- * functions. It updates the buffer with all data and writes it out. If
- * there is no buffer it means it was invalidated previously because a
- * data source was added or removed. In that case in creates a new buffer
- * first.
+ * functions. It updates the buffer with all data and writes it out. If there
+ * is no meta data it means it was invalidated previously because a data
+ * source was added or removed. In that case in creates a new buffer first.
  */
 int
-rrd_sample(RRD_PLUGIN * plugin, time_t (*t)(time_t*))
+rrd_sample(RRD_PLUGIN * plugin, time_t(*t) (time_t *))
 {
     assert(plugin);
-    JSON_Value     *json;
     int             n = 0;
     int64_t        *p;
     RRD_HEADER     *header;
 
-    json = json_for_plugin(plugin);
-    json_value_free(json);
-
     if (plugin->buf == NULL) {
-        int rc;
+        int             rc;
         rc = initialise(plugin);
         if (rc != 0) {
             return RRD_ERROR;
@@ -447,7 +449,7 @@ rrd_sample(RRD_PLUGIN * plugin, time_t (*t)(time_t*))
     header->rrd_timestamp = htonll((uint64_t) (t ? t(NULL) : time(NULL)));
     uint32_t        crc = crc32(0L, Z_NULL, 0);
     crc = crc32(crc,
-                (unsigned char *) &header->rrd_timestamp,
+                (unsigned char *)&header->rrd_timestamp,
                 (n + 1) * sizeof(int64_t));
     header->rrd_checksum_value = htonl(crc);
 
