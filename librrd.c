@@ -247,7 +247,7 @@ initialise(RRD_PLUGIN * plugin)
     size_total += RRD_MAX_JSON;
 
     plugin->buf_size = size_total;
-    plugin->buf = malloc(size_total);
+    plugin->buf = calloc(1, size_total);
     if (!plugin->buf) {
         /*
          * fatal

@@ -194,6 +194,20 @@ is updated. When a data source is added or removed, the existing buffer
 containing binary and meta data is invalidated, recomputed and gets
 written out.
 
+The design in contstrained by the following behavior of the RRD daemin
+RRDD:
+
+* RRDD maps an RRD file into memory and does not re-read in case the
+  file size changes. Therefore the library writes a static size that
+  depends on `RRD_MAX_SOURCES` and not on the actual number of data
+  sources being in use.
+
+* RRDD reads an RRD file and expects it have valid content. Hence, the
+  library can't open the file and write it contents with a delay.
+  Therefore the library writes an RRD file that indicated that initially
+  there are no data sources and re-writes the file for each data source
+  that is added. Checksums avoid other synchronisation problems.
+
 # Data Layout
 
 The data layout is not defined by this library but by the existing
