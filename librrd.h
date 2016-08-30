@@ -95,7 +95,7 @@ typedef struct rrd_plugin RRD_PLUGIN;
  */
 
 /*
- * rrd_open - regsiter a new plugin
+ * rrd_open - register a new plugin
  * name: name of the plugin in UTF8 encoding.
  * domain: INTER_DOMAIN if it reports data from multiple domains
  * path: file path where the plugin writes it samples
